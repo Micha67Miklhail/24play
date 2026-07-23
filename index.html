@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locker Terminal</title>
+<style>
+*{box-sizing:border-box}
+body{
+margin:0;
+font-family:Arial,Helvetica,sans-serif;
+background:#f5f5f7;
+display:flex;
+justify-content:center;
+align-items:center;
+min-height:100vh;
+}
+.container{width:min(1100px,95vw);}
+h1{text-align:center;font-size:44px;margin:10px 0 35px;color:#222}
+.grid{
+display:grid;
+grid-template-columns:repeat(3,1fr);
+gap:24px;
+}
+.card{
+background:#2563eb;
+color:#fff;
+border-radius:22px;
+height:220px;
+display:flex;
+flex-direction:column;
+justify-content:center;
+align-items:center;
+cursor:pointer;
+transition:.2s;
+user-select:none;
+}
+.card:hover{transform:scale(1.03)}
+.card:active{transform:scale(.98)}
+.card.used{
+background:#bfc5cf;
+color:#666;
+cursor:not-allowed;
+transform:none;
+}
+.num{font-size:64px;font-weight:700;line-height:1}
+.locker{font-size:28px;margin-top:12px}
+.usedtxt{font-size:26px;font-weight:700;margin-top:10px}
+.overlay{
+position:fixed;inset:0;
+background:rgba(0,0,0,.6);
+display:none;
+justify-content:center;
+align-items:center;
+}
+.popup{
+background:#fff;
+width:420px;
+max-width:90vw;
+padding:40px;
+border-radius:24px;
+text-align:center;
+}
+.popup h2{margin:0 0 20px;font-size:42px}
+.pin{font-size:70px;font-weight:bold;color:#2563eb;margin:20px 0}
+button{
+padding:18px 35px;
+font-size:22px;
+border:none;
+border-radius:14px;
+background:#2563eb;
+color:#fff;
+cursor:pointer;
+}
+
+.loading{
+position:fixed;inset:0;background:rgba(255,255,255,.92);display:none;justify-content:center;align-items:center;flex-direction:column;z-index:9999}
+.spinner{width:70px;height:70px;border:8px solid #ddd;border-top:8px solid #2563eb;border-radius:50%;animation:spin 1s linear infinite}
+.loading p{font-size:24px;color:#2563eb;font-weight:bold;margin-top:20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+body.busy .card{pointer-events:none;opacity:.6}
+</style>
+</head>
+<body>
+<div class="container">
+<div style="text-align:center;font-size:18px;color:#666;margin:8px 0 24px;font-weight:600;letter-spacing:.5px;">
+
+</div>
+<div class="grid" id="grid"></div>
+</div>
+
+
+<div class="overlay" id="confirmOverlay">
+    <div class="popup">
+        <h2 id="confirmLocker"></h2>
+
+        <p style="font-size:22px;margin:30px 0;">
+            Receive access PIN?
+        </p>
+
+        <div style="display:flex;gap:15px;justify-content:center;">
+
+            <button
+                style="background:#999;"
+                onclick="closeConfirm()">
+                Cancel
+            </button>
+
+            <button
+                onclick="confirmGetPin()">
+                Get PIN
+            </button>
+
+        </div>
+    </div>
+</div>
+
+<div class="loading" id="loadingOverlay"><div class="spinner"></div><p>Loading PIN...</p></div>
+<div class="overlay" id="overlay">
+
+<div class="popup">
+<h2 id="popupLocker"></h2>
+<div style="font-size:22px">PIN</div>
+<div class="pin" id="popupPin"></div>
+<button onclick="closePopup()">Close</button>
+</div>
+</div>
+
+<script>
+const API="https://script.google.com/macros/s/AKfycbzy_r7S_paEwhcnK_je9ll5hpOU8IJbES4iYkgkBai5cwwK9vs3Ld6BrQ9wz44v40fYYg/exec";
+
+let selectedLocker = "";
+let selectedCard = null;
+let isLoading=false;
+
+
+function showLoading(){
+ isLoading=true;
+ document.body.classList.add("busy");
+ document.getElementById("loadingOverlay").style.display="flex";
+}
+function hideLoading(){
+ isLoading=false;
+ document.body.classList.remove("busy");
+ document.getElementById("loadingOverlay").style.display="none";
+}
+
+function openConfirm(locker, card){
+
+    if(isLoading)return;
+    selectedLocker = locker;
+    selectedCard = card;
+
+    document.getElementById("confirmLocker").textContent = locker;
+
+    document.getElementById("confirmOverlay").style.display = "flex";
+}
+
+function closeConfirm(){
+
+    document.getElementById("confirmOverlay").style.display = "none";
+
+}
+
+function confirmGetPin(){
+
+    if(isLoading || !selectedLocker || !selectedCard){
+        return;
+    }
+
+    closeConfirm();
+    showLoading();
+    getPin(selectedLocker, selectedCard);
+
+}
+
+async function loadLockers(){
+ const res=await fetch(API);
+ const lockers=await res.json();
+ const grid=document.getElementById("grid");
+ grid.innerHTML="";
+ lockers.forEach((l,i)=>{
+   const c=document.createElement("div");
+   c.className="card"+(l.status==="Used"?" used":"");
+   c.innerHTML=l.status==="Used"
+      ?`<div class="num">${i+1}</div><div class="locker">${l.locker}</div><div class="usedtxt">USED</div>`
+      :`<div class="num">${i+1}</div><div class="locker">${l.locker}</div>`;
+   if(l.status!=="Used"){
+      c.onclick=()=>openConfirm(l.locker,c);
+   }
+   grid.appendChild(c);
+ });
+}
+
+async function getPin(locker,card){
+ try{
+ const res=await fetch(API+"?locker="+encodeURIComponent(locker));
+ const data=await res.json();
+ hideLoading();
+ if(!data.success){
+   alert(data.message);
+   loadLockers();
+   return;
+ }
+ hideLoading();
+ document.getElementById("popupLocker").textContent=locker;
+ document.getElementById("popupPin").textContent=data.pin;
+ document.getElementById("overlay").style.display="flex";
+ card.classList.add("used");
+ card.innerHTML=card.innerHTML+'<div class="usedtxt">USED</div>';
+ card.onclick=null;
+ }catch(e){hideLoading(); alert("Connection error. Please try again."); console.error(e);}
+}
+
+function closePopup(){
+ document.getElementById("overlay").style.display="none";
+}
+
+loadLockers();
+
+setInterval(loadLockers, 5000);
+
+</script>
+</body>
+</html>
