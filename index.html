@@ -238,11 +238,12 @@ async function getPin(locker,card){
 
 function closePopup(){
  document.getElementById("overlay").style.display="none";
+ loadLockers();
 }
 
 loadLockers();
 
-setInterval(loadLockers, 5000);
+setInterval(loadLockers, 3000);
 
 </script>
 </body>
