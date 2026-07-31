@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locker Terminal</title>
+<style>
+*{box-sizing:border-box}
+body{
+margin:0;
+font-family:Arial,Helvetica,sans-serif;
+background:#0B0F14;color:#fff;
+display:flex;
+justify-content:center;
+align-items:center;
+min-height:100vh;
+}
+.container{width:min(1100px,95vw);}
+.splash{position:fixed;inset:0;background:linear-gradient(180deg,#0B0F14,#141922);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:10000;color:#fff;transition:opacity .4s}
+.splash.hide{opacity:0;pointer-events:none}
+.logo{font-size:48px;font-weight:700;color:#29B6F6}
+.subtitle{margin-top:8px;color:#cbd5e1;font-size:20px}
+.dots{display:flex;gap:10px;margin-top:26px}
+.dots span{width:12px;height:12px;border-radius:50%;background:#29B6F6;animation:b 1.2s infinite}
+.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+@keyframes b{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1.2)}}
+h1{text-align:center;font-size:44px;margin:10px 0 35px;color:#222}
+.grid{
+display:grid;
+grid-template-columns:repeat(3,1fr);
+gap:24px;
+}
+.card{
+background:#1A202C;border:2px solid #2d3748;
+color:#fff;
+border-radius:22px;
+height:220px;
+display:flex;
+flex-direction:column;
+justify-content:center;
+align-items:center;
+cursor:pointer;
+transition:.2s;
+user-select:none;
+}
+.card:hover{transform:scale(1.03);border-color:#29B6F6}
+.card:active{transform:scale(.98)}
+.card.used{
+background:#bfc5cf;
+color:#666;
+cursor:not-allowed;
+transform:none;
+}
+.num{font-size:64px;font-weight:700;line-height:1}
+.locker{font-size:28px;margin-top:12px}
+.usedtxt{font-size:26px;font-weight:700;margin-top:10px}
+.overlay{
+position:fixed;inset:0;
+background:rgba(0,0,0,.6);
+display:none;
+justify-content:center;
+align-items:center;
+}
+.popup{
+background:#121820;
+color:#fff;
+width:420px;
+max-width:90vw;
+padding:40px;
+border-radius:24px;
+text-align:center;
+}
+.popup h2{margin:0 0 20px;font-size:42px}
+.pin{font-size:70px;font-weight:bold;color:#29B6F6;margin:20px 0}
+button{
+padding:18px 35px;
+font-size:22px;
+border:none;
+border-radius:14px;
+background:#29B6F6;border:2px solid #29B6F6;
+color:#fff;
+cursor:pointer;
+}
+
+.loading{
+position:fixed;inset:0;background:rgba(11,15,20,.96);display:none;justify-content:center;align-items:center;flex-direction:column;z-index:9999}
+.spinner{width:70px;height:70px;border:8px solid #ddd;border-top:8px solid #29B6F6;border-radius:50%;animation:spin 1s linear infinite}
+.loading p{font-size:24px;color:#29B6F6;font-weight:bold;margin-top:20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+body.busy .card{pointer-events:none;opacity:.6}
+</style>
+</head>
+<body>
+<div class='splash' id='splash'><div class='logo'>24Play</div><div class='subtitle'>Select your locker</div><div class='dots'><span></span><span></span><span></span></div><div style='margin-top:20px;color:#94a3b8'>Loading lockers...</div></div>
+<div class="container">
+<div style="text-align:center;font-size:18px;color:#666;margin:8px 0 24px;font-weight:600;letter-spacing:.5px;">
+
+</div>
+<div class="grid" id="grid"></div>
+</div>
+
+
+<div class="overlay" id="confirmOverlay">
+    <div class="popup">
+        <h2 id="confirmLocker"></h2>
+
+        <p style="font-size:22px;margin:30px 0;">
+            Pay to receive an access PIN?
+        </p>
+
+        <div style="display:flex;gap:15px;justify-content:center;">
+
+            <button
+                style="background:#2f3b52;color:#fff;border:2px solid #29B6F6;"
+                onclick="closeConfirm()">
+                CANCEL
+            </button>
+
+            <button
+                onclick="confirmGetPin()">
+                PAY
+            </button>
+
+        </div>
+    </div>
+</div>
+
+<div class="loading" id="loadingOverlay"><div class="spinner"></div><p id="loadingText">Loading...</p></div>
+<div class="overlay" id="overlay">
+
+<div class="popup">
+<h2 id="popupLocker"></h2>
+<div style="font-size:22px;color:#e5e7eb">PIN</div>
+<div class="pin" id="popupPin"></div>
+<button onclick="closePopup()">Close</button>
+</div>
+</div>
+
+<script>
+const API="https://script.google.com/macros/s/AKfycbzy_r7S_paEwhcnK_je9ll5hpOU8IJbES4iYkgkBai5cwwK9vs3Ld6BrQ9wz44v40fYYg/exec";
+
+let selectedLocker = "";
+let selectedCard = null;
+let isLoading=false;
+
+// Google Apps Script ContentService does not send CORS headers. JSONP is used
+// for these public GET endpoints; payment and PIN validity stay enforced server-side.
+function apiRequest(params){
+ return new Promise((resolve,reject)=>{
+   const callback="lockerJsonp_"+Date.now()+"_"+Math.random().toString(36).slice(2);
+   const url=new URL(API);
+   Object.entries(params).forEach(([key,value])=>url.searchParams.set(key,value));
+   url.searchParams.set("callback",callback);
+   const script=document.createElement("script");
+   const timeout=setTimeout(()=>finish(new Error("Request timed out")),30000);
+
+   function finish(error,data){
+     clearTimeout(timeout);
+     delete window[callback];
+     script.remove();
+     error ? reject(error) : resolve(data);
+   }
+   window[callback]=(data)=>finish(null,data);
+   script.onerror=()=>finish(new Error("Unable to connect to the payment server"));
+   script.src=url.toString();
+   document.head.appendChild(script);
+ });
+}
+
+
+function showLoading(message="Loading..."){
+ isLoading=true;
+ document.body.classList.add("busy");
+ document.getElementById("loadingText").textContent=message;
+ document.getElementById("loadingOverlay").style.display="flex";
+}
+function hideLoading(){
+ isLoading=false;
+ document.body.classList.remove("busy");
+ document.getElementById("loadingOverlay").style.display="none";
+}
+
+function openConfirm(locker, card){
+
+    if(isLoading)return;
+    selectedLocker = locker;
+    selectedCard = card;
+
+    document.getElementById("confirmLocker").textContent = locker;
+
+    document.getElementById("confirmOverlay").style.display = "flex";
+}
+
+function closeConfirm(){
+
+    document.getElementById("confirmOverlay").style.display = "none";
+
+}
+
+async function confirmGetPin(){
+
+    if(isLoading || !selectedLocker || !selectedCard){
+        return;
+    }
+
+    closeConfirm();
+    showLoading("Opening secure payment...");
+
+    try{
+        // The server creates the MyFatoorah invoice and returns its hosted payment URL.
+        // Keep the MyFatoorah API key on the server only.
+        const data=await apiRequest({action:"createPayment",locker:selectedLocker});
+        if(!data.success || !data.paymentUrl){
+            throw new Error(data.message || "Unable to create payment.");
+        }
+
+        // Saved only to restore the selected locker after MyFatoorah redirects back.
+        sessionStorage.setItem("pendingLocker", selectedLocker);
+        window.location.assign(data.paymentUrl);
+    }catch(e){
+        hideLoading();
+        alert(e.message || "Unable to start payment. Please try again.");
+        console.error(e);
+    }
+
+}
+
+let refreshInProgress=false;
+let refreshController=null;
+
+async function loadLockers(){
+ if(refreshInProgress || isLoading) return;
+ refreshInProgress=true;
+ try{
+ const lockers=await apiRequest({});
+ const grid=document.getElementById("grid");
+ grid.innerHTML="";
+ lockers.forEach((l,i)=>{
+   const c=document.createElement("div");
+   const unavailable=l.status!=="Free";
+   c.className="card"+(unavailable?" used":"");
+   c.innerHTML=unavailable
+      ?`<div class="num">${i+1}</div><div class="locker">${l.locker}</div><div class="usedtxt">${String(l.status).toUpperCase()}</div>`
+      :`<div class="num">${i+1}</div><div class="locker">${l.locker}</div>`;
+   if(!unavailable){
+      c.onclick=()=>openConfirm(l.locker,c);
+   }
+   grid.appendChild(c);
+ });
+ const splash=document.getElementById('splash');
+ splash.classList.add('hide');
+ setTimeout(()=>splash.style.display='none',400);
+ }finally{
+   refreshInProgress=false;
+ }
+}
+
+async function getPin(locker,card,paymentId){
+ try{
+ const data=await apiRequest({action:"issuePin",locker:locker,paymentId:paymentId});
+ hideLoading();
+ if(!data.success){
+   alert(data.message);
+   loadLockers();
+   return;
+ }
+ document.getElementById("popupLocker").textContent=locker;
+ document.getElementById("popupPin").textContent=data.pin;
+ document.getElementById("overlay").style.display="flex";
+ if(card){
+   card.classList.add("used");
+   card.innerHTML=card.innerHTML+'<div class="usedtxt">USED</div>';
+   card.onclick=null;
+ }
+ }catch(e){hideLoading(); alert("Connection error. Please try again."); console.error(e);}
+}
+
+async function completePaymentIfReturned(){
+ const params=new URLSearchParams(window.location.search);
+ const paymentId=params.get("paymentId") || params.get("PaymentId");
+ const locker=params.get("locker") || sessionStorage.getItem("pendingLocker");
+ if(!paymentId || !locker) return;
+
+ showLoading("Confirming payment...");
+ try{
+   // Do not trust the return URL itself: the server must verify payment with MyFatoorah.
+   const data=await apiRequest({action:"verifyPayment",paymentId:paymentId,locker:locker});
+   if(!data.success || !data.paid){
+     throw new Error(data.message || "Payment was not completed.");
+   }
+   sessionStorage.removeItem("pendingLocker");
+   history.replaceState({}, document.title, window.location.pathname);
+   await getPin(locker, null, paymentId);
+ }catch(e){
+   hideLoading();
+   sessionStorage.removeItem("pendingLocker");
+   history.replaceState({}, document.title, window.location.pathname);
+   alert(e.message || "We could not confirm your payment. Please contact support if you were charged.");
+   console.error(e);
+ }
+}
+
+function closePopup(){
+ document.getElementById("overlay").style.display="none";
+ loadLockers();
+}
+
+completePaymentIfReturned();
+loadLockers();
+
+setInterval(loadLockers, 3000);
+
+</script>
+</body>
+</html>
